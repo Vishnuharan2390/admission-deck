@@ -687,7 +687,7 @@ function renderEditor() {
     </div>
     <div class="cons-actions">
       <button class="btn small" data-act="count">Count from cases</button>
-      <p>Fills admissions, operated cases as major procedures, the rest as minor, and mode-of-injury counts. Edit anything after.</p>
+      <p>Fills admissions, operated cases as major procedures, the rest as minor, AMA, abscond, transfers to NS, and mode-of-injury counts. Edit anything after.</p>
     </div>
   </section>`;
 
@@ -862,9 +862,11 @@ ed.addEventListener('drop', async e => {
 
 function countFromCases() {
   const cs = state.cases, m = c => up(c.mode), n = re => { const x = cs.filter(c => re.test(m(c))).length; return x ? String(x) : ''; };
-  const op = cs.filter(c => c.outcome === 'OPERATED').length;
+  const out = o => cs.filter(c => c.outcome === o).length, nil = x => x ? String(x) : 'NIL';
+  const op = out('OPERATED');
   Object.assign(state.cons, {
     admissions: String(cs.length), major: String(op), minor: String(cs.length - op),
+    ama: nil(out('AMA')), abscond: nil(out('ABSCOND')), transfer: nil(out('NEUROSURGERY T/O')),
     rta: n(/RTA/), tta: n(/TTA/), fall: n(/FALL/), assault: n(/ASSAULT/), accidental: n(/ACCIDENT/),
     self: n(/SELF/), electro: n(/ELECTR/), nmlc: n(/^\s*NMLC/),
   });
