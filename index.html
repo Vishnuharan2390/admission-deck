@@ -193,8 +193,8 @@ button,input,textarea,select{font:inherit;color:inherit}
 .cons-actions{display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap}
 .cons-actions p{margin:0;color:var(--muted);font-size:.85rem;flex:1;min-width:200px}
 
-.op-toggle{display:inline-flex;align-items:center;gap:8px;border:1.5px solid var(--rule);border-radius:999px;padding:5px 12px 5px 8px;cursor:pointer;font-weight:700;font-size:.9rem;user-select:none}
-.op-toggle input{width:18px;height:18px;accent-color:var(--red);margin:0}
+.op-toggle{border:1.5px solid var(--rule);border-radius:999px;padding:6px 12px;cursor:pointer;font:inherit;font-weight:700;font-size:.9rem;background:transparent;color:inherit;max-width:100%}
+.op-toggle:focus{outline:2px solid var(--rust);outline-offset:1px}
 .op-toggle.on{border-color:var(--red);color:var(--red);background:#FDF0EF}
 .case-tools{display:flex;gap:2px}
 
@@ -424,7 +424,7 @@ function buildModels(st, images) {
   const out = [coverModel(st), consModel(st)];
   (st.cases || []).forEach((c, i) => {
     const rows = caseRows(c);
-    out.push({ kind: 'case', target: 'case-' + c.id, caseNo: i + 1, operated: !!c.operated, rows, ...tableLayout(rows) });
+    out.push({ kind: 'case', target: 'case-' + c.id, caseNo: i + 1, outcome: up(c.outcome), rows, ...tableLayout(rows) });
     (c.slides || []).forEach(s => {
       const imgs = s.images.map(id => images[id]).filter(Boolean);
       const label = up(s.label) || 'IMAGE';
@@ -474,7 +474,7 @@ function buildPptx(PptxGenJS, st, images) {
     } else if (m.kind === 'case') {
       const s = pres.addSlide({ masterName: 'RULED' });
       const title = [{ text: `CASE ${m.caseNo}` }];
-      if (m.operated) title.push({ text: ' (OPERATED)', options: { color: COL.red } });
+      if (m.outcome) title.push({ text: ` (${m.outcome})`, options: { color: COL.red } });
       s.addText(title, { x: 2.4, y: 0.63, w: 22, h: 3.1, isTextBox: true, fontFace: 'Calibri Light', fontSize: 96,
         color: COL.title, valign: 'bottom', margin: 0, objectName: 'Case title' });
       const k = m.scale;
@@ -519,7 +519,10 @@ const MAX_PX = 2400, JPEG_Q = 0.88;
 const KEY_STATE = 'admdeck:state', KEY_IMG = 'admdeck:img:';
 
 /* ---------- state ---------- */
-const newCase = (writtenBy = '') => ({ id: uid(), operated: false, name: '', ageSex: '', mode: '', diagnosis: '', treatment: '', writtenBy, slides: [] });
+const OUTCOMES = ['OPERATED', 'AMA', 'ABSCOND', 'NEUROSURGERY T/O', 'PLASTIC T/O', 'VASCULAR T/O', 'SURGERY T/O'];
+// older saves stored a plain operated checkbox
+const migrateCases = st => { (st.cases || []).forEach(c => { if (c.outcome == null) c.outcome = c.operated ? 'OPERATED' : ''; delete c.operated; }); return st; };
+const newCase = (writtenBy = '') => ({ id: uid(), outcome: '', name: '', ageSex: '', mode: '', diagnosis: '', treatment: '', writtenBy, slides: [] });
 const blankCons = () => ({ deaths: 'NIL', ama: 'NIL', abscond: 'NIL', transfer: 'NIL' });
 function blankState(prev) {
   return { v: 1, unit: (prev && prev.unit) || 'I', date: todayISO(), professor: '', daos: '', cons: blankCons(),
@@ -560,7 +563,7 @@ async function load() {
     try {
       const st = JSON.parse(raw);
       if (st && st.cases) {
-        state = Object.assign(blankState(), st);
+        state = Object.assign(blankState(), migrateCases(st));
         state.cons = Object.assign(blankCons(), st.cons || {});
         const ids = allImageIds();
         const got = await Promise.all(ids.map(id => store.get(KEY_IMG + id)));
@@ -693,7 +696,7 @@ function renderEditor() {
   <section class="card" id="case-${c.id}">
     <div class="card-head">
       <h2>Case ${i + 1}</h2>
-      <label class="op-toggle ${c.operated ? 'on' : ''}"><input type="checkbox" data-bind="case:${c.id}:operated" ${c.operated ? 'checked' : ''}> Operated</label>
+      <select class="op-toggle ${c.outcome ? 'on' : ''}" data-bind="case:${c.id}:outcome" aria-label="Case ${i + 1} outcome"><option value="">No outcome</option>${OUTCOMES.map(o => `<option ${c.outcome === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>
       <div class="case-tools">
         <button class="btn ghost small" data-act="case-up" data-id="${c.id}" aria-label="Move case ${i + 1} up" ${i === 0 ? 'disabled' : ''}>${ICON.up}</button>
         <button class="btn ghost small" data-act="case-down" data-id="${c.id}" aria-label="Move case ${i + 1} down" ${i === state.cases.length - 1 ? 'disabled' : ''}>${ICON.down}</button>
@@ -761,7 +764,7 @@ function setBound(bind, el) {
   else if (bind.startsWith('case:')) {
     const [, id, key] = bind.split(':'); const c = findCase(id); if (!c) return;
     c[key] = val;
-    if (key === 'operated') el.closest('.op-toggle').classList.toggle('on', val);
+    if (key === 'outcome') el.classList.toggle('on', !!val);
   } else if (bind.startsWith('slide:')) {
     const [, id, key] = bind.split(':'); const { s } = findSlide(id); if (s) s[key] = val;
   } else {
@@ -778,7 +781,7 @@ ed.addEventListener('change', e => {
   if (b === 'professor') remember(state.recent.prof, e.target.value);
   if (b === 'daos') remember(state.recent.daos, e.target.value);
   if (b.endsWith(':writtenBy')) remember(state.recent.pg, e.target.value);
-  if (b.endsWith(':operated')) setBound(b, e.target);
+  if (b.endsWith(':outcome')) setBound(b, e.target);
   fillDatalists(); scheduleSave();
 });
 
@@ -859,7 +862,7 @@ ed.addEventListener('drop', async e => {
 
 function countFromCases() {
   const cs = state.cases, m = c => up(c.mode), n = re => { const x = cs.filter(c => re.test(m(c))).length; return x ? String(x) : ''; };
-  const op = cs.filter(c => c.operated).length;
+  const op = cs.filter(c => c.outcome === 'OPERATED').length;
   Object.assign(state.cons, {
     admissions: String(cs.length), major: String(op), minor: String(cs.length - op),
     rta: n(/RTA/), tta: n(/TTA/), fall: n(/FALL/), assault: n(/ASSAULT/), accidental: n(/ACCIDENT/),
@@ -885,7 +888,7 @@ function slideHTML(m) {
       + `<div class="abs" style="${P(3.23, 4.25, 10.2, 8.6)};${F(40)};color:#404040">${m.left.map((t, i) => `<div style="margin-bottom:.4em;${i === 1 || i === 2 ? 'font-style:italic' : ''}">${esc(t)}</div>`).join('')}</div>`
       + `<div class="abs" style="${P(13.9, 4.1, 11, 8.9)};${F(44)};color:#080808">${m.right.map(t => `<div style="margin-bottom:.32em">&bull;&nbsp; ${esc(t)}</div>`).join('')}</div>`;
   } else if (m.kind === 'case') {
-    h += `<div class="abs light" style="${P(2.4, 0.63, 22, 3.1)};${F(96)};display:flex;align-items:flex-end">CASE ${m.caseNo}${m.operated ? '&nbsp;<span style="color:#FF0000">(OPERATED)</span>' : ''}</div>` + ruleAt(3.8)
+    h += `<div class="abs light" style="${P(2.4, 0.63, 22, 3.1)};${F(96)};display:flex;align-items:flex-end">CASE ${m.caseNo}${m.outcome ? `&nbsp;<span style="color:#FF0000">(${esc(m.outcome)})</span>` : ''}</div>` + ruleAt(3.8)
       + `<div class="abs" style="${P(2.72, 3.8, 20.44, 9.75)}"><table><colgroup><col style="width:${pct(4.13, 20.44)}"><col></colgroup>`
       + m.rows.map((r, i) => {
         const bg = r.diag ? 'background:#FBE4D5;' : '';
@@ -1001,7 +1004,7 @@ async function importBackup(f) {
     const obj = JSON.parse(await f.text());
     if (!obj || !obj.state || !obj.state.cases) throw new Error('This is not a backup file from this page.');
     allImageIds().forEach(dropImage);
-    state = Object.assign(blankState(), obj.state); state.cons = Object.assign(blankCons(), obj.state.cons || {});
+    state = Object.assign(blankState(), migrateCases(obj.state)); state.cons = Object.assign(blankCons(), obj.state.cons || {});
     Object.entries(obj.images || {}).forEach(([id, im]) => { putImage(id, im); saveImage(id); });
     scheduleSave(); renderEditor(); renderPreview(true); toast('Backup opened', true);
   } catch (err) { toast(err.message.startsWith('Unexpected') ? 'That file is not a backup file from this page.' : err.message); }
